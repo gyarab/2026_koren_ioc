@@ -3,18 +3,26 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Orientacni Beh - QR Tracker</title>
+<title>Orientační Běh - QR Tracker</title>
+
 <link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="style.css">
-</head>
-<body>
 
+<style>
+  /* aby byla mapa vidět */
+  #mapCanvas {
+    border: 2px solid black;
+    margin-top: 10px;
+  }
+</style>
+</head>
+
+<body>
 
 <header>
   <button id="menuToggle">&#9776;</button>
-  <h1>Orientacni Beh</h1>
+  <h1>Orientační Běh</h1>
 </header>
-
 
 <nav id="sidebar" class="closed">
   <ul>
@@ -22,13 +30,13 @@
     <li data-view="home">Domů</li>
     <li data-view="scanner">Scanner</li>
     <li data-view="history">Historie běhů</li>
-    <li data-view="teacher">Dashboard Učitele</li>
+
+    <!--  důležité ID -->
+    <li data-view="teacher" id="teacherNav">Dashboard Učitele</li>
   </ul>
 </nav>
 
-
 <main id="mainContent">
-
 
   <!-- Login -->
   <section id="login" class="view active">
@@ -41,39 +49,43 @@
     <div id="loginOutput"></div>
   </section>
 
-
+  <!-- HOME -->
   <section id="home" class="view">
     <h2>Vítejte!</h2>
     <p>Začni běh a skenuj QR kódy na trati.</p>
-    <div id="locationOutput">Poloha zatím nezískána</div>
+
+    <!--  TADY JE MAPA -->
+    <canvas id="mapCanvas" width="400" height="400"></canvas>
+
+    <div id="locationOutput">Klikni na mapu pro nastavení polohy</div>
   </section>
 
-
+  <!-- SCANNER -->
   <section id="scanner" class="view">
     <h2>Scanner</h2>
     <video id="video" autoplay></video>
     <canvas id="canvas" style="display:none;"></canvas>
+
     <div id="scanOutput">Zatím nic naskenováno</div>
     <button id="startScan">Start Scan</button>
   </section>
 
-
+  <!-- HISTORY -->
   <section id="history" class="view">
     <h2>Historie běhů</h2>
     <ul id="historyList"></ul>
   </section>
 
-
+  <!-- TEACHER -->
   <section id="teacher" class="view">
     <h2>Dashboard Učitele</h2>
     <ul id="teacherList"></ul>
   </section>
 
-
 </main>
-
 
 <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
 <script src="app.js"></script>
+
 </body>
 </html>
