@@ -4,17 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Orientační Běh - QR Tracker</title>
-
 <link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="style.css">
-
-<style>
-  /* aby byla mapa vidět */
-  #mapCanvas {
-    border: 2px solid black;
-    margin-top: 10px;
-  }
-</style>
 </head>
 
 <body>
@@ -30,8 +21,6 @@
     <li data-view="home">Domů</li>
     <li data-view="scanner">Scanner</li>
     <li data-view="history">Historie běhů</li>
-
-    <!--  důležité ID -->
     <li data-view="teacher" id="teacherNav">Dashboard Učitele</li>
   </ul>
 </nav>
@@ -49,34 +38,30 @@
     <div id="loginOutput"></div>
   </section>
 
-  <!-- HOME -->
+  <!-- Home -->
   <section id="home" class="view">
     <h2>Vítejte!</h2>
     <p>Začni běh a skenuj QR kódy na trati.</p>
-
-    <!--  TADY JE MAPA -->
     <canvas id="mapCanvas" width="400" height="400"></canvas>
-
     <div id="locationOutput">Klikni na mapu pro nastavení polohy</div>
   </section>
 
-  <!-- SCANNER -->
+  <!-- Scanner -->
   <section id="scanner" class="view">
     <h2>Scanner</h2>
     <video id="video" autoplay></video>
     <canvas id="canvas" style="display:none;"></canvas>
-
     <div id="scanOutput">Zatím nic naskenováno</div>
     <button id="startScan">Start Scan</button>
   </section>
 
-  <!-- HISTORY -->
+  <!-- History -->
   <section id="history" class="view">
     <h2>Historie běhů</h2>
     <ul id="historyList"></ul>
   </section>
 
-  <!-- TEACHER -->
+  <!-- Teacher Dashboard -->
   <section id="teacher" class="view">
     <h2>Dashboard Učitele</h2>
     <ul id="teacherList"></ul>
@@ -86,6 +71,5 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
 <script src="app.js"></script>
-
 </body>
 </html>
