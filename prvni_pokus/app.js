@@ -5,7 +5,6 @@ const JSONBIN_URL     = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
 
 // --- Offline Queue ---
 let offlineQueue = JSON.parse(localStorage.getItem('offlineQueue') || '[]');
-
 function saveQueueToStorage() {
     localStorage.setItem('offlineQueue', JSON.stringify(offlineQueue));
 }
@@ -14,7 +13,6 @@ window.addEventListener('online', () => {
     showToast('Připojení obnoveno, ukládám data...', 'info');
     flushOfflineQueue();
 });
-
 window.addEventListener('offline', () => {
     showToast('Offline – skeny se ukládají lokálně', 'warning');
 });
@@ -59,7 +57,7 @@ async function writeDB(data) {
     if (!res.ok) throw new Error('Chyba zapisu DB: ' + res.status);
 }
 
-// --- Race Condition Fix: retry with re-read on each attempt ---
+// --- Safe Write with Retry ---
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 300;
 
@@ -67,8 +65,6 @@ async function safeWriteScan(scanEntry) {
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
         try {
             const db = await readDB();
-
-            // Deduplicate: skip if same user+QR saved in last 5s
             const isDuplicate = db.scans.some(s =>
                 s.user === scanEntry.user &&
                 s.data === scanEntry.data &&
@@ -82,7 +78,6 @@ async function safeWriteScan(scanEntry) {
         } catch (err) {
             console.warn(`Pokus ${attempt + 1} selhal:`, err);
             if (attempt < MAX_RETRIES - 1) {
-                // Random jitter so two colliding clients don't retry at the same time
                 await new Promise(r => setTimeout(r, RETRY_DELAY_MS + Math.random() * 300));
             }
         }
@@ -90,24 +85,7 @@ async function safeWriteScan(scanEntry) {
     return false;
 }
 
-async function safeWriteLocation(user, coords) {
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        try {
-            const db = await readDB();
-            db.users[user] = coords;
-            await writeDB(db);
-            return true;
-        } catch (err) {
-            console.warn(`Pokus polohy ${attempt + 1} selhal:`, err);
-            if (attempt < MAX_RETRIES - 1) {
-                await new Promise(r => setTimeout(r, RETRY_DELAY_MS + Math.random() * 300));
-            }
-        }
-    }
-    return false;
-}
-
-// --- Flush Offline Queue ---
+// --- Offline Flush ---
 async function flushOfflineQueue() {
     if (offlineQueue.length === 0 || !navigator.onLine) return;
 
@@ -172,7 +150,7 @@ loginForm.addEventListener('submit', e => {
 // --- QR Scanner ---
 let video = document.getElementById('video');
 let canvas = document.getElementById('canvas');
-let ctx = canvas.getContext('2d');
+let ctxCanvas = canvas.getContext('2d');
 let scanOutput = document.getElementById('scanOutput');
 let scanning = false;
 
@@ -199,8 +177,8 @@ function scanFrame() {
     if (video.readyState === video.HAVE_ENOUGH_DATA) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        ctxCanvas.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctxCanvas.getImageData(0, 0, canvas.width, canvas.height);
         const code = jsQR(imageData.data, imageData.width, imageData.height);
         if (code) {
             const timestamp = new Date().toLocaleTimeString();
@@ -213,7 +191,7 @@ function scanFrame() {
     requestAnimationFrame(scanFrame);
 }
 
-// --- Handle Scan: offline support + confirmation toast ---
+// --- Handle Scan ---
 async function handleScan(scanEntry) {
     showToast('Ukladam sken...', 'info');
 
@@ -266,30 +244,35 @@ async function loadHistory() {
     }
 }
 
-// --- Geolocation ---
-let locationOutput = document.getElementById('locationOutput');
-let lastCoords = null;
+// --- Map & Location Panel ---
+const mapCanvas = document.getElementById('mapCanvas');
+const ctxMap = mapCanvas.getContext('2d');
+const mapImage = new Image();
+mapImage.src = 'mapa.png';
+let lastDot = null;
 
-async function updateLocation() {
-    if (!currentUser || !navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(async pos => {
-        const coords = {
-            lat: pos.coords.latitude.toFixed(5),
-            lon: pos.coords.longitude.toFixed(5),
-            time: new Date().toLocaleTimeString()
-        };
+mapImage.onload = () => ctxMap.drawImage(mapImage, 0, 0, mapCanvas.width, mapCanvas.height);
 
-        locationOutput.textContent = `Sirka: ${coords.lat}, Delka: ${coords.lon} (cas: ${coords.time})`;
+// klikání pro nastavení polohy
+mapCanvas.addEventListener('click', e => {
+    if (!currentUser) return;
+    const rect = mapCanvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
 
-        // Skip write if position hasn't changed
-        if (lastCoords && lastCoords.lat === coords.lat && lastCoords.lon === coords.lon) return;
-        lastCoords = coords;
+    lastDot = { x, y, time: new Date().toLocaleTimeString() };
+    drawMapDot(x, y);
+    safeWriteLocation(currentUser, { x, y, time: lastDot.time });
+});
 
-        if (navigator.onLine) await safeWriteLocation(currentUser, coords);
-    });
+function drawMapDot(x, y) {
+    ctxMap.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
+    ctxMap.drawImage(mapImage, 0, 0, mapCanvas.width, mapCanvas.height);
+    ctxMap.fillStyle = 'red';
+    ctxMap.beginPath();
+    ctxMap.arc(x, y, 6, 0, 2 * Math.PI);
+    ctxMap.fill();
 }
-
-setInterval(updateLocation, 60000);
 
 // --- Teacher Dashboard ---
 async function loadTeacherDashboard() {
@@ -307,7 +290,7 @@ async function loadTeacherDashboard() {
             const scans = db.scans.filter(d => d.user === user);
             const li = document.createElement('li');
             li.innerHTML = `<strong>${user}</strong><br>
-                Poloha: ${coords.lat}, ${coords.lon}<br>
+                Poloha: ${coords.x}, ${coords.y}<br>
                 Cas: ${coords.time}<br>
                 QR naskenovano: ${scans.length}`;
             list.appendChild(li);
