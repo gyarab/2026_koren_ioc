@@ -5,6 +5,7 @@ const JSONBIN_URL     = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
 
 // --- Offline Queue ---
 let offlineQueue = JSON.parse(localStorage.getItem('offlineQueue') || '[]');
+
 function saveQueueToStorage() {
     localStorage.setItem('offlineQueue', JSON.stringify(offlineQueue));
 }
@@ -13,6 +14,7 @@ window.addEventListener('online', () => {
     showToast('Připojení obnoveno, ukládám data...', 'info');
     flushOfflineQueue();
 });
+
 window.addEventListener('offline', () => {
     showToast('Offline – skeny se ukládají lokálně', 'warning');
 });
@@ -57,7 +59,7 @@ async function writeDB(data) {
     if (!res.ok) throw new Error('Chyba zapisu DB: ' + res.status);
 }
 
-// --- Safe Write with Retry ---
+// --- SAFE WRITE ---
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 300;
 
@@ -65,6 +67,7 @@ async function safeWriteScan(scanEntry) {
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
         try {
             const db = await readDB();
+
             const isDuplicate = db.scans.some(s =>
                 s.user === scanEntry.user &&
                 s.data === scanEntry.data &&
@@ -76,16 +79,32 @@ async function safeWriteScan(scanEntry) {
             await writeDB(db);
             return true;
         } catch (err) {
-            console.warn(`Pokus ${attempt + 1} selhal:`, err);
             if (attempt < MAX_RETRIES - 1) {
-                await new Promise(r => setTimeout(r, RETRY_DELAY_MS + Math.random() * 300));
+                await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
             }
         }
     }
     return false;
 }
 
-// --- Offline Flush ---
+// 🔴 DOPLNĚNO – ukládání polohy
+async function safeWriteLocation(user, coords) {
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        try {
+            const db = await readDB();
+            db.users[user] = coords;
+            await writeDB(db);
+            return true;
+        } catch (err) {
+            if (attempt < MAX_RETRIES - 1) {
+                await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+            }
+        }
+    }
+    return false;
+}
+
+// --- Flush Offline Queue ---
 async function flushOfflineQueue() {
     if (offlineQueue.length === 0 || !navigator.onLine) return;
 
@@ -102,56 +121,110 @@ async function flushOfflineQueue() {
     if (failed.length > 0) {
         offlineQueue = [...offlineQueue, ...failed];
         saveQueueToStorage();
-        showToast(`${failed.length} skenu se nepodarilo ulozit`, 'error');
-    } else {
-        showToast(`${toRetry.length} offline skenu uspesne ulozeno!`, 'success');
     }
 }
 
-// --- Sidebar & Navigation ---
-const menuToggle = document.getElementById('menuToggle');
-const sidebar = document.getElementById('sidebar');
-const views = document.querySelectorAll('.view');
-const navItems = document.querySelectorAll('nav ul li');
+// --- Login ---
+let currentUser = null;
 
-menuToggle.addEventListener('click', () => sidebar.classList.toggle('open'));
+const loginForm = document.getElementById('loginForm');
+
+loginForm.addEventListener('submit', e => {
+    e.preventDefault();
+
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value.trim();
+
+    if (!username || !password) {
+        showToast('Vyplň jméno a heslo!', 'error');
+        return;
+    }
+
+    if (username === 'teacher' && password === 'admin123') {
+        currentUser = 'teacher';
+        showToast('Přihlášen jako učitel');
+    } else {
+        currentUser = username;
+        showToast(`Přihlášen jako ${username}`);
+    }
+
+    updateUIForRole();
+    flushOfflineQueue();
+});
+
+// --- Role UI ---
+function updateUIForRole() {
+    const teacherNav = document.getElementById('teacherNav');
+    if (!teacherNav) return;
+
+    teacherNav.style.display = (currentUser === 'teacher') ? 'block' : 'none';
+}
+
+// --- Navigace ---
+const navItems = document.querySelectorAll('nav ul li');
+const views = document.querySelectorAll('.view');
+
 navItems.forEach(item => {
     item.addEventListener('click', () => {
         const viewId = item.dataset.view;
+
+        if (viewId === 'teacher' && currentUser !== 'teacher') {
+            showToast('Pouze pro učitele!', 'error');
+            return;
+        }
+
         views.forEach(v => v.classList.remove('active'));
         document.getElementById(viewId).classList.add('active');
-        sidebar.classList.remove('open');
+
         if (viewId === 'history') loadHistory();
         if (viewId === 'teacher') loadTeacherDashboard();
     });
 });
 
-// --- Login ---
-let currentUser = null;
-const loginForm = document.getElementById('loginForm');
-const loginOutput = document.getElementById('loginOutput');
+// --- MAPA ---
+const mapCanvas = document.getElementById('mapCanvas');
+const ctxMap = mapCanvas.getContext('2d');
 
-loginForm.addEventListener('submit', e => {
-    e.preventDefault();
-    const username = document.getElementById('username').value.trim();
-    const password = document.getElementById('password').value.trim();
-    if (username && password) {
-        currentUser = username;
-        loginOutput.textContent = '';
-        views.forEach(v => v.classList.remove('active'));
-        document.getElementById('home').classList.add('active');
-        showToast(`Prihlaseno jako ${currentUser}`, 'success');
-        flushOfflineQueue();
-    } else {
-        loginOutput.textContent = 'Vyplnte jmeno a heslo!';
+const mapImage = new Image();
+mapImage.src = 'mapa.png';
+
+mapImage.onload = () => {
+    ctxMap.drawImage(mapImage, 0, 0, mapCanvas.width, mapCanvas.height);
+};
+
+function drawDot(x, y) {
+    ctxMap.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
+    ctxMap.drawImage(mapImage, 0, 0, mapCanvas.width, mapCanvas.height);
+
+    ctxMap.fillStyle = 'red';
+    ctxMap.beginPath();
+    ctxMap.arc(x, y, 6, 0, 2 * Math.PI);
+    ctxMap.fill();
+}
+
+mapCanvas.addEventListener('click', e => {
+    if (!currentUser) {
+        showToast('Nejsi přihlášen!', 'error');
+        return;
     }
+
+    const rect = mapCanvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    drawDot(x, y);
+
+    safeWriteLocation(currentUser, {
+        x,
+        y,
+        time: new Date().toLocaleTimeString()
+    });
 });
 
 // --- QR Scanner ---
 let video = document.getElementById('video');
 let canvas = document.getElementById('canvas');
-let ctxCanvas = canvas.getContext('2d');
-let scanOutput = document.getElementById('scanOutput');
+let ctx = canvas.getContext('2d');
 let scanning = false;
 
 document.getElementById('startScan').addEventListener('click', () => {
@@ -165,145 +238,71 @@ function startCamera() {
         .then(stream => {
             video.srcObject = stream;
             requestAnimationFrame(scanFrame);
-        })
-        .catch(err => {
-            scanOutput.textContent = "Nelze spustit kameru: " + err;
-            scanning = false;
         });
 }
 
 function scanFrame() {
     if (!scanning) return;
+
     if (video.readyState === video.HAVE_ENOUGH_DATA) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-        ctxCanvas.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const imageData = ctxCanvas.getImageData(0, 0, canvas.width, canvas.height);
+
+        ctx.drawImage(video, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const code = jsQR(imageData.data, imageData.width, imageData.height);
+
         if (code) {
-            const timestamp = new Date().toLocaleTimeString();
-            scanOutput.textContent = `Naskenovano: ${code.data}`;
-            handleScan({ user: currentUser, data: code.data, time: timestamp });
+            showToast("QR: " + code.data);
             scanning = false;
             setTimeout(() => scanning = true, 2000);
         }
     }
+
     requestAnimationFrame(scanFrame);
-}
-
-// --- Handle Scan ---
-async function handleScan(scanEntry) {
-    showToast('Ukladam sken...', 'info');
-
-    if (!navigator.onLine) {
-        offlineQueue.push(scanEntry);
-        saveQueueToStorage();
-        showToast(`Offline: sken ulozen lokalne (${offlineQueue.length} ceka)`, 'warning');
-        return;
-    }
-
-    const ok = await safeWriteScan(scanEntry);
-    if (ok) {
-        showToast(`✓ Sken ulozen: ${scanEntry.data}`, 'success');
-    } else {
-        offlineQueue.push(scanEntry);
-        saveQueueToStorage();
-        showToast('Chyba ukladani – uloženo lokalne', 'warning');
-    }
 }
 
 // --- History ---
 async function loadHistory() {
     const list = document.getElementById('historyList');
     list.innerHTML = '<li>Nacitam...</li>';
-    try {
-        const db = await readDB();
-        list.innerHTML = '';
-        const userScans = db.scans.filter(d => d.user === currentUser);
-        const pending = offlineQueue.filter(d => d.user === currentUser);
 
-        if (userScans.length === 0 && pending.length === 0) {
-            list.innerHTML = '<li>Zadne skeny zatim.</li>';
-            return;
-        }
+    const db = await readDB();
+    list.innerHTML = '';
 
-        userScans.forEach(item => {
-            const li = document.createElement('li');
-            li.textContent = `${item.time} – ${item.data}`;
-            list.appendChild(li);
-        });
+    const userScans = db.scans.filter(d => d.user === currentUser);
 
-        pending.forEach(item => {
-            const li = document.createElement('li');
-            li.textContent = `${item.time} – ${item.data} ⏳ (ceka na odeslani)`;
-            li.style.opacity = '0.6';
-            list.appendChild(li);
-        });
-    } catch (err) {
-        list.innerHTML = '<li>Chyba pri nacitani.</li>';
-    }
-}
-
-// --- Map & Location Panel ---
-const mapCanvas = document.getElementById('mapCanvas');
-const ctxMap = mapCanvas.getContext('2d');
-const mapImage = new Image();
-mapImage.src = 'mapa.png';
-let lastDot = null;
-
-mapImage.onload = () => ctxMap.drawImage(mapImage, 0, 0, mapCanvas.width, mapCanvas.height);
-
-// klikání pro nastavení polohy
-mapCanvas.addEventListener('click', e => {
-    if (!currentUser) return;
-    const rect = mapCanvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    lastDot = { x, y, time: new Date().toLocaleTimeString() };
-    drawMapDot(x, y);
-    safeWriteLocation(currentUser, { x, y, time: lastDot.time });
-});
-
-function drawMapDot(x, y) {
-    ctxMap.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
-    ctxMap.drawImage(mapImage, 0, 0, mapCanvas.width, mapCanvas.height);
-    ctxMap.fillStyle = 'red';
-    ctxMap.beginPath();
-    ctxMap.arc(x, y, 6, 0, 2 * Math.PI);
-    ctxMap.fill();
+    userScans.forEach(item => {
+        const li = document.createElement('li');
+        li.textContent = `${item.time} – ${item.data}`;
+        list.appendChild(li);
+    });
 }
 
 // --- Teacher Dashboard ---
 async function loadTeacherDashboard() {
     const list = document.getElementById('teacherList');
     list.innerHTML = '<li>Nacitam...</li>';
-    try {
-        const db = await readDB();
-        list.innerHTML = '';
-        const entries = Object.entries(db.users);
-        if (entries.length === 0) {
-            list.innerHTML = '<li>Zadni uzivatele zatim.</li>';
-            return;
-        }
-        entries.forEach(([user, coords]) => {
-            const scans = db.scans.filter(d => d.user === user);
-            const li = document.createElement('li');
-            li.innerHTML = `<strong>${user}</strong><br>
-                Poloha: ${coords.x}, ${coords.y}<br>
-                Cas: ${coords.time}<br>
-                QR naskenovano: ${scans.length}`;
-            list.appendChild(li);
-        });
-    } catch (err) {
-        list.innerHTML = '<li>Chyba pri nacitani dashboardu.</li>';
-    }
+
+    const db = await readDB();
+    list.innerHTML = '';
+
+    Object.entries(db.users).forEach(([user, coords]) => {
+        const scans = db.scans.filter(d => d.user === user);
+
+        const li = document.createElement('li');
+        li.innerHTML = `<strong>${user}</strong><br>
+            Poloha: ${coords.x}, ${coords.y}<br>
+            Cas: ${coords.time}<br>
+            QR: ${scans.length}`;
+
+        list.appendChild(li);
+    });
 }
 
-// --- On load: flush any queued scans ---
+// --- On load ---
 window.addEventListener('load', () => {
     if (navigator.onLine && offlineQueue.length > 0) {
-        showToast(`Nalezeno ${offlineQueue.length} offline skenu, odesilam...`, 'info');
         flushOfflineQueue();
     }
 });
