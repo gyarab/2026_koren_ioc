@@ -64,25 +64,6 @@
   <!-- Teacher Dashboard -->
   <section id="teacher" class="view">
     <h2>Dashboard Učitele</h2>
-
-    <!-- Vytvoření běhu -->
-    <div id="createRunSection">
-      <h3>Vytvořit nový běh</h3>
-      <input type="text" id="runName" placeholder="Název běhu">
-      <input type="number" id="controlCount" placeholder="Počet kontrol">
-      <button onclick="createRun(
-        document.getElementById('runName').value,
-        document.getElementById('controlCount').value
-      )">Vytvořit běh</button>
-      <div>
-        <img id="qrOutput" alt="QR kód pro běh">
-      </div>
-    </div>
-
-    <!-- Seznam běhů -->
-    <div id="runsList"></div>
-
-    <!-- Seznam studentů -->
     <ul id="teacherList"></ul>
   </section>
 
@@ -90,5 +71,13 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
 <script src="app.js"></script>
+<script>
+  // Registrace Service Workera
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js')
+      .then(() => console.log('SW registrovan'))
+      .catch(err => console.error('Chyba registrace SW:', err));
+  }
+</script>
 </body>
 </html>
